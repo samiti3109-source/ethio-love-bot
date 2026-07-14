@@ -28,6 +28,9 @@ if not BOT_TOKEN:
 bot = telebot.TeleBot(BOT_TOKEN)
 DB_FILE = 'ethio_love_bot.db'
 
+# የአድሚን ቴሌግራም አይዲ (ID)
+ADMIN_ID = 1883279841
+
 def get_db_connection():
     conn = sqlite3.connect(DB_FILE)
     conn.row_factory = sqlite3.Row
@@ -195,6 +198,30 @@ def view_profiles(message):
         "ሌላ ፕሮፋይል ለማየት /view_profiles ን ይጫኑ።"
     )
     bot.send_message(message.chat.id, profile_sample, parse_mode="Markdown")
+
+# 🔄 ዳታቤዙን ላንተ ብቻ (1883279841) የሚያጸዳው ኮድ
+@bot.message_handler(commands=['reset_db'])
+def reset_database(message):
+    user_id = message.from_user.id
+    
+    # ላንተ ብቻ መፈቀዱን የሚያረጋግጥ መስመር
+    if user_id != ADMIN_ID:
+        # አድሚን ካልሆነ ምንም ምላሽ ሳይሰጥ ዝም ይላል (ወይም ስህተት መልዕክት መላክ ይቻላል)
+        return
+        
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("DROP TABLE IF EXISTS users")
+        cursor.execute("DROP TABLE IF EXISTS daily_views")
+        conn.commit()
+        conn.close()
+        
+        init_db()
+        bot.reply_to(message, "🔄 ሄሎ ሳሚ! ዳታቤዙ (Database) በስኬት ተጠርጓል!")
+    except Exception as e:
+        conn.close()
+        bot.reply_to(message, f"❌ ስህተት አጋጥሟል: {str(e)}")
 
 if __name__ == '__main__':
     print("ቦቱ በRender ላይ በተሳካ ሁኔታ ስራ ጀምሯል...")
