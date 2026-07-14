@@ -150,31 +150,50 @@ def send_welcome(message):
     if is_new:
         welcome_text += "🎉 እንኳን ደስ አለዎት! የ 5 ቀን ነጻ ቪአይፒ (VIP) ተሰጥቶዎታል። ሁሉንም አገልግሎቶች ያለገደብ መጠቀም ይችላሉ!\n\n"
     
-    welcome_text += "የፍቅር አጋር መገለጫዎችን ለመፈለግ /view_profiles ን ይጠቀሙ።\nለክፍያ አማራጮች /buy_vip ን ይጫኑ።"
+    welcome_text += "የራስዎን መገለጫ ለማየት /profile ን ይጠቀሙ።\nየሌሎችን የፍቅር አጋር መገለጫዎችን ለመፈለግ /view_profiles ን ይጠቀሙ።\nለክፍያ አማራጮች /buy_vip ን ይጫኑ።"
     bot.reply_to(message, welcome_text)
 
-@bot.message_handler(commands=['buycoins', 'buy_vip'])
-def show_payment_options(message):
-    price_text = (
-        "⭐ **የVIP አባልነት የክፍያ አማራጮች** ⭐\n\n"
-        "የኛ ቪአይፒ አባል በመሆን በቀን ያለገደብ ፕሮፋይሎችን መመልከት እና መልዕክት መለዋወጥ ይችላሉ!\n\n"
-        "የቪአይፒ ፓኬጆቻችን፦\n"
-        "1️⃣ **የ 1 ወር አባልነት** ➔ **199 ብር**\n"
-        "2️⃣ **የ 3 ወር አባልነት** ➔ **499 ብር**\n"
-        "3️⃣ **የ 6 ወር አባልነት** ➔ **999 ብር**\n"
-        "4️⃣ **የ 1 ዓመት አባልነት** ➔ **1799 ብር**\n\n"
-        "👇 ለመክፈል ከታች ከቀረቡት አማራጮች አንዱን ይምረጡ፦"
+# 👤 1. የራስን መገለጫ (My Profile) ማሳያ ኮድ
+@bot.message_handler(commands=['profile'])
+def my_profile(message):
+    user_id = message.from_user.id
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT * FROM users WHERE user_id = ?", (user_id,))
+    user = cursor.fetchone()
+    
+    if not user:
+        bot.reply_to(message, "❌ እባክዎ መጀመሪያ ቦቱን ለማስጀመር /start ን ይጫኑ።")
+        conn.close()
+        return
+        
+    is_vip = user['is_vip']
+    vip_expiry = user['vip_expiry']
+    fullname = user['fullname']
+    username = f"@{user['username']}" if user['username'] else "የለውም"
+    
+    # የቪአይፒ ሁኔታን ፅሁፍ ማስተካከያ
+    vip_status = "❌ ቪአይፒ አይደሉም (ነጻ እቅድ)"
+    if is_vip == 1 and vip_expiry:
+        try:
+            expiry_date = datetime.strptime(vip_expiry, '%Y-%m-%d %H:%M:%S')
+            if datetime.now() < expiry_date:
+                vip_status = f"✅ ቪአይፒ አባል (የሚያበቃበት ቀን: {expiry_date.strftime('%Y-%m-%d')})"
+        except ValueError:
+            pass
+            
+    profile_text = (
+        "👤 **የእርስዎ መገለጫ (My Profile)** 👤\n\n"
+        f"🏷 **ስም፦** {fullname}\n"
+        f"🆔 **ቴሌግራም ID፦** `{user_id}`\n"
+        f"🌐 **ዩዘርኔም፦** {username}\n"
+        f"⭐️ **የአባልነት ሁኔታ፦** {vip_status}\n\n"
+        "የሌሎችን አባላት መገለጫ ለማየት /view_profiles ን ይጠቀሙ።"
     )
-    markup = types.InlineKeyboardMarkup(row_width=1)
-    
-    btn_1m = types.InlineKeyboardButton("የ 1 ወር (199 ብር) መክፈያ", url="https://dashboard.chapa.co")
-    btn_3m = types.InlineKeyboardButton("የ 3 ወር (499 ብር) መክፈያ", url="https://dashboard.chapa.co")
-    btn_6m = types.InlineKeyboardButton("የ 6 ወር (999 ብር) መክፈያ", url="https://dashboard.chapa.co")
-    btn_1y = types.InlineKeyboardButton("የ 1 ዓመት (1799 ብር) መክፈያ", url="https://dashboard.chapa.co")
-    
-    markup.add(btn_1m, btn_3m, btn_6m, btn_1y)
-    bot.send_message(message.chat.id, price_text, parse_mode="Markdown", reply_markup=markup)
+    bot.send_message(message.chat.id, profile_text, parse_mode="Markdown")
+    conn.close()
 
+# 🔍 2. የሌሎችን መገለጫ (View Other Profiles) ማሳያ ኮድ
 @bot.message_handler(commands=['view_profiles'])
 def view_profiles(message):
     user_id = message.from_user.id
@@ -199,14 +218,34 @@ def view_profiles(message):
     )
     bot.send_message(message.chat.id, profile_sample, parse_mode="Markdown")
 
-# 🔄 ዳታቤዙን ላንተ ብቻ (1883279841) የሚያጸዳው ኮድ
+@bot.message_handler(commands=['buycoins', 'buy_vip'])
+def show_payment_options(message):
+    price_text = (
+        "⭐ **የVIP አባልነት የክፍያ አማራጮች** ⭐\n\n"
+        "የኛ ቪአይፒ አባል በመሆን በቀን ያለገደብ ፕሮፋይሎችን መመልከት እና መልዕክት መለዋወጥ ይችላሉ!\n\n"
+        "የቪአይፒ ፓኬጆቻችን፦\n"
+        "1️⃣ **የ 1 ወር አባልነት** ➔ **199 ብር**\n"
+        "2️⃣ **የ 3 ወር አባልነት** ➔ **499 ብር**\n"
+        "3️⃣ **የ 6 ወር አባልነት** ➔ **999 ብር**\n"
+        "4️⃣ **የ 1 ዓመት አባልነት** ➔ **1799 ብር**\n\n"
+        "👇 ለመክፈል ከታች ከቀረቡት አማራጮች አንዱን ይምረጡ፦"
+    )
+    markup = types.InlineKeyboardMarkup(row_width=1)
+    
+    btn_1m = types.InlineKeyboardButton("የ 1 ወር (199 ብር) መክፈያ", url="https://dashboard.chapa.co")
+    btn_3m = types.InlineKeyboardButton("የ 3 ወር (499 ብር) መክፈያ", url="https://dashboard.chapa.co")
+    btn_6m = types.InlineKeyboardButton("የ 6 ወር (999 ብር) መክፈያ", url="https://dashboard.chapa.co")
+    btn_1y = types.InlineKeyboardButton("የ 1 ዓመት (1799 ብር) መክፈያ", url="https://dashboard.chapa.co")
+    
+    markup.add(btn_1m, btn_3m, btn_6m, btn_1y)
+    bot.send_message(message.chat.id, price_text, parse_mode="Markdown", reply_markup=markup)
+
+# 🔄 ዳታቤዙን ለአድሚን ብቻ (1883279841) የሚያጸዳው ኮድ
 @bot.message_handler(commands=['reset_db'])
 def reset_database(message):
     user_id = message.from_user.id
     
-    # ላንተ ብቻ መፈቀዱን የሚያረጋግጥ መስመር
     if user_id != ADMIN_ID:
-        # አድሚን ካልሆነ ምንም ምላሽ ሳይሰጥ ዝም ይላል (ወይም ስህተት መልዕክት መላክ ይቻላል)
         return
         
     conn = get_db_connection()
