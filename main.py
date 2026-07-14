@@ -138,6 +138,7 @@ def increment_and_check_profile_view(user_id):
     conn.close()
     return True
 
+# 1. /start ➔ ምዝገባ / ዋና ምናሌ
 @bot.message_handler(commands=['start'])
 def send_welcome(message):
     user_id = message.from_user.id
@@ -150,10 +151,10 @@ def send_welcome(message):
     if is_new:
         welcome_text += "🎉 እንኳን ደስ አለዎት! የ 5 ቀን ነጻ ቪአይፒ (VIP) ተሰጥቶዎታል። ሁሉንም አገልግሎቶች ያለገደብ መጠቀም ይችላሉ!\n\n"
     
-    welcome_text += "የራስዎን መገለጫ ለማየት /profile ን ይጠቀሙ።\nየሌሎችን የፍቅር አጋር መገለጫዎችን ለመፈለግ /view_profiles ን ይጠቀሙ።\nለክፍያ አማራጮች /buy_vip ን ይጫኑ።"
+    welcome_text += "👤 የራስዎን መገለጫ ለማየት /profile ን ይጠቀሙ።\n🔍 የሌሎችን መገለጫ ለመፈለግ /browse ን ይጠቀሙ።\n👑 ቪአይፒ ለመሆን /vip ን ይጫኑ።"
     bot.reply_to(message, welcome_text)
 
-# 👤 1. የራስን መገለጫ (My Profile) ማሳያ ኮድ
+# 2. /profile ➔ የእኔ ፕሮፋይል
 @bot.message_handler(commands=['profile'])
 def my_profile(message):
     user_id = message.from_user.id
@@ -172,7 +173,6 @@ def my_profile(message):
     fullname = user['fullname']
     username = f"@{user['username']}" if user['username'] else "የለውም"
     
-    # የቪአይፒ ሁኔታን ፅሁፍ ማስተካከያ
     vip_status = "❌ ቪአይፒ አይደሉም (ነጻ እቅድ)"
     if is_vip == 1 and vip_expiry:
         try:
@@ -188,13 +188,13 @@ def my_profile(message):
         f"🆔 **ቴሌግራም ID፦** `{user_id}`\n"
         f"🌐 **ዩዘርኔም፦** {username}\n"
         f"⭐️ **የአባልነት ሁኔታ፦** {vip_status}\n\n"
-        "የሌሎችን አባላት መገለጫ ለማየት /view_profiles ን ይጠቀሙ።"
+        "መረጃዎን ለማስተካከል /edit ን ይጠቀሙ።"
     )
     bot.send_message(message.chat.id, profile_text, parse_mode="Markdown")
     conn.close()
 
-# 🔍 2. የሌሎችን መገለጫ (View Other Profiles) ማሳያ ኮድ
-@bot.message_handler(commands=['view_profiles'])
+# 3. /browse ➔ ፕሮፋይሎችን ማሰስ
+@bot.message_handler(commands=['browse'])
 def view_profiles(message):
     user_id = message.from_user.id
     can_view = increment_and_check_profile_view(user_id)
@@ -203,22 +203,23 @@ def view_profiles(message):
         block_text = (
             "🚫 *የዛሬው የ30 ፕሮፋይል እይታ ገደብዎ አልቋል!*\n\n"
             "መመልከት ለመቀጠል እና ቀጥታ መልዕክት ለመላክ በወር *199 ብር* ብቻ በመክፈል ቪአይፒ (VIP) ይሁኑ!\n\n"
-            "ለመክፈል /buy_vip ን ይጫኑ።"
+            "ለመክፈል /vip ን ይጫኑ።"
         )
         bot.send_message(message.chat.id, block_text, parse_mode="Markdown")
         return
     
     profile_sample = (
-        "👤 *የአባሉ መገለጫ*\n"
-        "ስም: አስቴር\n"
+        "🔍 **የአባላት መገለጫዎች** 🔍\n\n"
+        "👤 ስም: አስቴር\n"
         "እድሜ: 24\n"
         "ከተማ: አዲስ አበባ\n"
         "ስራ: ተማሪ\n\n"
-        "ሌላ ፕሮፋይል ለማየት /view_profiles ን ይጫኑ።"
+        "ቀጣይ ፕሮፋይል ለማየት /browse ን ይጫኑ።"
     )
     bot.send_message(message.chat.id, profile_sample, parse_mode="Markdown")
 
-@bot.message_handler(commands=['buycoins', 'buy_vip'])
+# 4. /vip ➔ ቪአይፒ ለመሆን
+@bot.message_handler(commands=['vip', 'buycoins', 'buy_vip'])
 def show_payment_options(message):
     price_text = (
         "⭐ **የVIP አባልነት የክፍያ አማራጮች** ⭐\n\n"
@@ -239,6 +240,48 @@ def show_payment_options(message):
     
     markup.add(btn_1m, btn_3m, btn_6m, btn_1y)
     bot.send_message(message.chat.id, price_text, parse_mode="Markdown", reply_markup=markup)
+
+# 5. /likes ➔ እኔን ላይክ ያደረጉኝ
+@bot.message_handler(commands=['likes'])
+def show_likes(message):
+    likes_text = (
+        "❤️ **እርስዎን ላይክ ያደረጉ ሰዎች** ❤️\n\n"
+        "እስካሁን ምንም አዲስ ላይክ የሎትም። መገለጫዎትን እያሻሻሉ በቆዩ ቁጥር ብዙ ሰዎች መውደዳቸውን ይገልጻሉ!"
+    )
+    bot.send_message(message.chat.id, likes_text, parse_mode="Markdown")
+
+# 6. /matches ➔ ማች የሆኑ ፕሮፋይሎች
+@bot.message_handler(commands=['matches'])
+def show_matches(message):
+    matches_text = (
+        "🎉 **የእርስዎ ምርጫዎች (Matches)** 🎉\n\n"
+        "እስካሁን ምንም አዲስ ተዛማጅ (Match) የሎትም። መገለጫዎችን መመልከትዎን ይቀጥሉ!"
+    )
+    bot.send_message(message.chat.id, matches_text, parse_mode="Markdown")
+
+# 7. /edit ➔ ፕሮፋይል ማሻሻል
+@bot.message_handler(commands=['edit'])
+def edit_profile(message):
+    edit_text = (
+        "⚙️ **መገለጫ ማሻሻያ** ⚙️\n\n"
+        "የመገለጫ ዝርዝሮችዎን ለማስተካከል በቅርቡ አዳዲስ ምርጫዎች እዚህ ይጨመራሉ!"
+    )
+    bot.send_message(message.chat.id, edit_text, parse_mode="Markdown")
+
+# 8. /help ➔ እርዳታ
+@bot.message_handler(commands=['help'])
+def help_info(message):
+    help_text = (
+        "ℹ️ **እርዳታ እና መረጃ** ℹ️\n\n"
+        "ይህ ቦት የኢትዮጵያ ፍቅር አጋር መፈለጊያ መተግበሪያ ነው።\n\n"
+        "📌 **ዋና ዋና ትዕዛዞች፦**\n"
+        "• /start ➔ ቦቱን መጀመርያ\n"
+        "• /browse ➔ የሰዎችን ፕሮፋይል ማየት\n"
+        "• /profile ➔ የእርስዎን መረጃ ማሳያ\n"
+        "• /vip ➔ ቪአይፒ መሆን\n\n"
+        "ለተጨማሪ ድጋፍ አድሚኑን ማነጋገር ይችላሉ።"
+    )
+    bot.send_message(message.chat.id, help_text, parse_mode="Markdown")
 
 # 🔄 ዳታቤዙን ለአድሚን ብቻ (1883279841) የሚያጸዳው ኮድ
 @bot.message_handler(commands=['reset_db'])
