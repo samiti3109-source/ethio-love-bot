@@ -35,7 +35,7 @@ ADMIN_ID = 1883279841
 # ጊዜያዊ ምዝገባ መረጃዎችን መያዣ
 user_states = {}
 
-# 👑 የVIP ዋጋ እና የክፍያ መረጃ (እባክዎ ይህንን ያዘምኑ)
+# 👑 የVIP ዋጋ እና የክፍያ መረጃ
 VIP_PRICE_ETB = 100
 VIP_DURATION_DAYS = 30
 VIP_PAYMENT_INFO_AM = (
@@ -187,8 +187,12 @@ def get_next_profile(viewer_id):
     params = [viewer_id]
 
     if looking_for not in ('ሁለቱንም', 'Both'):
-        query += " AND gender = ?"
-        params.append(looking_for)
+        query += " AND (gender = ? OR gender = ?)"
+        # ጾታው በአማርኛም በእንግሊዝኛም የተመዘገቡትን እንዲፈልግ
+        if looking_for in ('ወንድ', 'Male'):
+            params.extend(['ወንድ', 'Male'])
+        else:
+            params.extend(['ሴት', 'Female'])
 
     query += """
         AND user_id NOT IN (
@@ -273,7 +277,7 @@ def profile_cmd(message):
     is_vip = check_vip_status(user_id)
 
     if lang == 'am':
-        vip_line = "👑 VIP አባል" if is_vip else "🔓 መደበኛ አባል"
+        vip_line = f"👑 VIP አባል (እስከ {user['vip_expiry']})" if is_vip else "🔓 መደበኛ አባል"
         caption = (
             f"👤 **{user['fullname']}**\n"
             f"🎂 እድሜ፦ {user['age']}\n"
@@ -286,7 +290,7 @@ def profile_cmd(message):
             f"⚙️ መረጃ ለማስተካከል ➔ /edit"
         )
     else:
-        vip_line = "👑 VIP Member" if is_vip else "🔓 Standard Member"
+        vip_line = f"👑 VIP Member (Until {user['vip_expiry']})" if is_vip else "🔓 Standard Member"
         caption = (
             f"👤 **{user['fullname']}**\n"
             f"🎂 Age: {user['age']}\n"
@@ -361,7 +365,7 @@ def browse_cmd(message):
     else:
         bot.send_message(message.chat.id, caption, reply_markup=markup, parse_mode="Markdown")
 
-# 4️⃣ /edit ➔ መገለጫ ማስተካከያ (ቀላል ስሪት: ከዜሮ ማስመዝገብ)
+# 4️⃣ /edit ➔ መገለጫ ማስተካከያ
 @bot.message_handler(commands=['edit'])
 def edit_cmd(message):
     user_id = message.from_user.id
@@ -376,7 +380,7 @@ def edit_cmd(message):
         else "✍️ Let's update your profile. Please enter your **Full Name**:"
     bot.send_message(message.chat.id, prompt, parse_mode="Markdown")
 
-# 5️⃣ /vip ➔ የ VIP መረጃ (ክፍያ ገና አልተካተተም - ማስተካከል ያስፈልጋል)
+# 5️⃣ /vip ➔ የ VIP መረጃ
 @bot.message_handler(commands=['vip'])
 def vip_cmd(message):
     user_id = message.from_user.id
@@ -455,117 +459,130 @@ def makevip_cmd(message):
     except Exception:
         pass
 
-# ጽሁፍ እና ፎቶ የሚቀበል የሜሴጅ ሃንድለር
-@bot.message_handler(content_types=['text', 'photo'])
-def registration_flow(message):
-    user_id = message.from_user.id
+# 7️⃣ የInline ኮልባኮችን መቆጣጠሪያ (Callback Query Handler)
+@bot.callback_query_handler(func=lambda call: True)
+def handle_callback_queries(call):
+    bot.answer_callback_query(call.id)
+    user_id = call.from_user.id
+
+    # አድሚን የክፍያ ፎቶ ሲያጸድቅ / ሲያሳግድ
+    if call.data.startswith("vipapprove_"):
+        target_user_id = int(call.data.split("_", 1)[1])
+        expiry = (datetime.now() + timedelta(days=VIP_DURATION_DAYS)).strftime('%Y-%m-%d %H:%M:%S')
+        
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute("UPDATE users SET is_vip = 1, vip_expiry = ? WHERE user_id = ?", (expiry, target_user_id))
+        conn.commit()
+        conn.close()
+
+        bot.edit_message_caption(
+            chat_id=call.message.chat.id,
+            message_id=call.message.message_id,
+            caption=call.message.caption + f"\n\n✅ Approved! User {target_user_id} is now VIP."
+        )
+        
+        # ለተጠቃሚው ማሳወቂያ መላክ
+        target_lang = get_user_language(target_user_id)
+        notify = f"🎉 የክፍያ ደረሰኝዎ ጸድቋል! አሁን የ {VIP_DURATION_DAYS} ቀናት VIP አባል ሆነዋል።" if target_lang == 'am' \
+            else f"🎉 Your payment receipt has been approved! You are now VIP for {VIP_DURATION_DAYS} days."
+        try:
+            bot.send_message(target_user_id, notify)
+        except Exception:
+            pass
+        return
+
+    elif call.data.startswith("vipreject_"):
+        target_user_id = int(call.data.split("_", 1)[1])
+        bot.edit_message_caption(
+            chat_id=call.message.chat.id,
+            message_id=call.message.message_id,
+            caption=call.message.caption + f"\n\n❌ Rejected! Receipt disapproved."
+        )
+        
+        target_lang = get_user_language(target_user_id)
+        notify = "❌ የላኩት የክፍያ ፎቶ ተቀባይነት አላገኘም። እባክዎ ትክክለኛውን ደረሰኝ በድጋሚ ይላኩ።" if target_lang == 'am' \
+            else "❌ Your payment receipt was rejected. Please send a valid screenshot again."
+        try:
+            bot.send_message(target_user_id, notify)
+        except Exception:
+            pass
+        return
+
+    # 'Next' የሚለውን ቁልፍ ሲጫኑ ሌላ ሰው ለማሳየት
+    if call.data == "browse_next":
+        browse_cmd(call.message)
+        return
+
+    # ተጠቃሚው 'ተከፍያለሁ' ወይም 'I've Paid' ሲል
+    if call.data == "vip_paid":
+        lang = get_user_language(user_id) if is_registered(user_id) else 'am'
+        user_states[user_id] = {'step': 'awaiting_payment_proof', 'language': lang}
+        
+        payment_info = VIP_PAYMENT_INFO_AM if lang == 'am' else VIP_PAYMENT_INFO_EN
+        bot.send_message(call.message.chat.id, payment_info, parse_mode="Markdown")
+        return
+
     if user_id not in user_states:
         return
 
     state = user_states[user_id]
-    step = state.get('step')
-    lang = state.get('language', 'am')
 
-    # 💳 የክፍያ ደረሰኝ (screenshot) መቀበል
-    if step == 'awaiting_payment_proof':
-        if message.content_type != 'photo':
-            err = "⚠️ እባክዎ የክፍያ ደረሰኝ **ስክሪንሾት** ብቻ ይላኩ።" if lang == 'am' else "⚠️ Please send a **screenshot** of your payment receipt."
-            bot.reply_to(message, err, parse_mode="Markdown")
-            return
+    # ቋንቋ ምርጫ ሲያደርግ
+    if call.data.startswith("lang_"):
+        selected_lang = call.data.split("_", 1)[1]
+        state['language'] = selected_lang
+        state['step'] = 'get_name'
 
-        photo_id = message.photo[-1].file_id
-        user = get_user(user_id)
-        fullname = user['fullname'] if user else message.from_user.first_name
-        username = message.from_user.username or "N/A"
+        bot.delete_message(call.message.chat.id, call.message.message_id)
 
-        admin_caption = (
-            f"💳 **New VIP Payment Proof**\n"
-            f"User: {fullname} (@{username})\n"
-            f"User ID: `{user_id}`\n"
-            f"Amount expected: {VIP_PRICE_ETB} ETB / {VIP_DURATION_DAYS} days"
-        )
-        admin_markup = types.InlineKeyboardMarkup()
-        admin_markup.add(
-            types.InlineKeyboardButton("✅ Approve", callback_data=f"vipapprove_{user_id}"),
-            types.InlineKeyboardButton("❌ Reject", callback_data=f"vipreject_{user_id}")
-        )
-        try:
-            bot.send_photo(ADMIN_ID, photo_id, caption=admin_caption, reply_markup=admin_markup, parse_mode="Markdown")
-        except Exception:
-            pass
+        if selected_lang == 'am':
+            prompt = "🇪🇹 ቋንቋ አማርኛ ተመርጧል።\n\n✍️ እባክዎ **ሙሉ ስምዎን** ያስገቡ፦"
+        else:
+            prompt = "🇬🇧 English Language Selected.\n\n✍️ Please enter your **Full Name**:"
 
-        user_states.pop(user_id, None)
-        confirm = "✅ ደረሰኝዎ ለአድሚን ተልኳል። እባክዎ እስኪረጋገጥ ይጠብቁ።" if lang == 'am' \
-            else "✅ Your receipt has been sent to the admin. Please wait for approval."
-        bot.reply_to(message, confirm)
-        return
+        bot.send_message(call.message.chat.id, prompt, parse_mode="Markdown")
 
-    # ሀ) ስም መቀበል
-    if step == 'get_name' and message.text:
-        if message.text.startswith('/'):
-            return
-        state['fullname'] = message.text
-        state['step'] = 'get_gender'
+    # ጾታ ምርጫ ሲያደርግ
+    elif call.data.startswith("gender_"):
+        gender = call.data.split("_", 1)[1]
+        state['gender'] = gender
+        state['step'] = 'get_looking_for'
+        lang = state.get('language', 'am')
 
         markup = types.InlineKeyboardMarkup(row_width=2)
         if lang == 'am':
-            btn_male = types.InlineKeyboardButton("👨 ወንድ ነኝ", callback_data="gender_ወንድ")
-            btn_female = types.InlineKeyboardButton("👩 ሴት ነኝ", callback_data="gender_ሴት")
-            text = f"✨ ደስ የሚል ስም ነው **{message.text}**!\n\n👇 እባክዎ የእርስዎን ጾታ ይምረጡ፦"
+            btn_m = types.InlineKeyboardButton("👨 ወንድ", callback_data="look_ወንድ")
+            btn_f = types.InlineKeyboardButton("👩 ሴት", callback_data="look_ሴት")
+            btn_b = types.InlineKeyboardButton("🧑‍🤝‍🧑 ሁለቱንም", callback_data="look_ሁለቱንም")
+            prompt = f"👤 ጾታ፦ **{gender}** ተመርጧል።\n\n🔍 ለመሆኑ **ማንን ማግኘት ይፈልጋሉ?** (የሚፈልጉትን ጾታ ይምረጡ)፦"
         else:
-            btn_male = types.InlineKeyboardButton("👨 Male", callback_data="gender_Male")
-            btn_female = types.InlineKeyboardButton("👩 Female", callback_data="gender_Female")
-            text = f"✨ Nice name **{message.text}**!\n\n👇 Please select your gender:"
+            btn_m = types.InlineKeyboardButton("👨 Male", callback_data="look_Male")
+            btn_f = types.InlineKeyboardButton("👩 Female", callback_data="look_Female")
+            btn_b = types.InlineKeyboardButton("🧑‍🤝‍🧑 Both", callback_data="look_Both")
+            prompt = f"👤 Gender: **{gender}** selected.\n\n🔍 Who are you **interested in?**:"
 
-        markup.add(btn_male, btn_female)
-        bot.send_message(message.chat.id, text, reply_markup=markup, parse_mode="Markdown")
+        markup.add(btn_m, btn_f, btn_b)
+        bot.delete_message(call.message.chat.id, call.message.message_id)
+        bot.send_message(call.message.chat.id, prompt, reply_markup=markup, parse_mode="Markdown")
 
-    # ሐ) እድሜ መቀበል
-    elif step == 'get_age' and message.text:
-        if message.text.startswith('/'):
-            return
-        try:
-            age = int(message.text)
-            if age < 18 or age > 100:
-                err_text = "⚠️ እባክዎ ትክክለኛ እድሜ ያስገቡ (ከ 18 ዓመት በላይ መሆን አለበት)፦" if lang == 'am' else "⚠️ Please enter a valid age (must be 18 or older):"
-                bot.reply_to(message, err_text)
-                return
-            state['age'] = age
-            state['step'] = 'get_city'
+    # የሚፈለገው ጾታ ምርጫ
+    elif call.data.startswith("look_"):
+        looking_for = call.data.split("_", 1)[1]
+        state['looking_for'] = looking_for
+        state['step'] = 'get_age'
+        lang = state.get('language', 'am')
 
-            markup = types.InlineKeyboardMarkup(row_width=2)
-            if lang == 'am':
-                c1 = types.InlineKeyboardButton("📍 አዲስ አበባ", callback_data="city_አዲስ አበባ")
-                c2 = types.InlineKeyboardButton("📍 አዳማ", callback_data="city_አዳማ")
-                c3 = types.InlineKeyboardButton("📍 ሐዋሳ", callback_data="city_ሐዋሳ")
-                c4 = types.InlineKeyboardButton("📍 ባህር ዳር", callback_data="city_ባህር ዳር")
-                c5 = types.InlineKeyboardButton("📍 ድሬዳዋ", callback_data="city_ድሬዳዋ")
-                c6 = types.InlineKeyboardButton("📍 መቐለ", callback_data="city_መቐለ")
-                c_other = types.InlineKeyboardButton("🌐 ሌላ ከተማ", callback_data="city_other")
-                city_prompt = "📍 በመቀጠል አሁን የሚኖሩበትን **ከተማ** ይምረጡ፦"
-            else:
-                c1 = types.InlineKeyboardButton("📍 Addis Ababa", callback_data="city_Addis Ababa")
-                c2 = types.InlineKeyboardButton("📍 Adama", callback_data="city_Adama")
-                c3 = types.InlineKeyboardButton("📍 Hawassa", callback_data="city_Hawassa")
-                c4 = types.InlineKeyboardButton("📍 Bahir Dar", callback_data="city_Bahir Dar")
-                c5 = types.InlineKeyboardButton("📍 Dire Dawa", callback_data="city_Dire Dawa")
-                c6 = types.InlineKeyboardButton("📍 Mekelle", callback_data="city_Mekelle")
-                c_other = types.InlineKeyboardButton("🌐 Other City", callback_data="city_other")
-                city_prompt = "📍 Next, select the **city** you live in:"
+        bot.delete_message(call.message.chat.id, call.message.message_id)
+        if lang == 'am':
+            prompt = f"🔍 የሚፈልጉት ጾታ፦ **{looking_for}** ተመርጧል።\n\n🎂 እባክዎ **እድሜዎን** በቁጥር ያስገቡ (ለምሳሌ፦ 24)፦"
+        else:
+            prompt = f"🔍 Interested in: **{looking_for}** selected.\n\n🎂 Please enter your **Age** in numbers (e.g., 24):"
 
-            markup.add(c1, c2, c3, c4, c5, c6)
-            markup.add(c_other)
+        bot.send_message(call.message.chat.id, prompt, parse_mode="Markdown")
 
-            bot.send_message(message.chat.id, city_prompt, reply_markup=markup, parse_mode="Markdown")
-        except ValueError:
-            err_num = "⚠️ እባክዎ እድሜዎን በቁጥር ብቻ ያስገቡ (ለምሳሌ፦ 25)፦" if lang == 'am' else "⚠️ Please enter your age in numbers only (e.g., 25):"
-            bot.reply_to(message, err_num)
-
-    # መ) ሌላ ከተማ በጽሁፍ ሲያስገባ መቀበል
-    elif step == 'get_custom_city' and message.text:
-        if message.text.startswith('/'):
-            return
-        state['city'] = message.text
-        state['step'] = 'get_religion'
-
-        markup = types.InlineKeyboard
+    # ከተማ ምርጫ (በአዝራር)
+    elif call.data.startswith("city_"):
+        city_choice = call.data.split("_", 1)[1]
+        lang = state.get('language', 'am')
+    
