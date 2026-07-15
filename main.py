@@ -28,7 +28,7 @@ if not BOT_TOKEN:
 bot = telebot.TeleBot(BOT_TOKEN)
 DB_FILE = 'ethio_love_bot.db'
 
-# የአድሚን (የሳሚ) ቴሌግራም ID
+# የአድሚን ቴሌግራም ID
 ADMIN_ID = 1883279841
 
 # ጊዜያዊ ምዝገባ መረጃዎችን መያዣ
@@ -146,7 +146,6 @@ def start_cmd(message):
     user_id = message.from_user.id
     
     if is_registered(user_id):
-        # የቋንቋ መረጃን ከዳታቤዝ ማውጣት
         conn = get_db_connection()
         cursor = conn.cursor()
         cursor.execute("SELECT language FROM users WHERE user_id = ?", (user_id,))
@@ -197,7 +196,7 @@ def registration_flow(message):
         
     state = user_states[user_id]
     step = state.get('step')
-    lang = state.get('language', 'am') # ካልተመረጠ default አማርኛ ነው
+    lang = state.get('language', 'am')
     
     # ሀ) ስም መቀበል
     if step == 'get_name' and message.text:
@@ -230,7 +229,6 @@ def registration_flow(message):
             state['age'] = age
             state['step'] = 'get_city'
             
-            # ከተማ ለመምረጥ Inline Buttons ማዘጋጀት
             markup = types.InlineKeyboardMarkup(row_width=2)
             if lang == 'am':
                 c1 = types.InlineKeyboardButton("📍 አዲስ አበባ", callback_data="city_አዲስ አበባ")
@@ -463,4 +461,6 @@ def handle_callback_queries(call):
         if lang == 'am':
             prompt = f"⭐️ ኮከብ፦ **{zodiac}** ተመርጧል።\n\n📸 **የመጨረሻው ደረጃ!** እባክዎ ለሌሎች አባላት የሚታይ ምርጥ **ፎቶዎን** ይላኩ፦"
         else:
-            prompt = f"⭐️ Zodiac: **{zodiac}** selected.\n\n📸 **Final step!** Please upload a
+            prompt = f"⭐️ Zodiac: **{zodiac}** selected.\n\n📸 **Final step!** Please upload a nice **photo** for your profile:"
+            
+        bot.send_message(call.message.chat.id, prompt, pars
