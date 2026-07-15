@@ -94,6 +94,23 @@ def init_db():
             PRIMARY KEY (viewer_id, viewed_id)
         )
     ''')
+    # Likes እና Matches ሰንጠረዦች (ለቻት እና ለላይክ የሚረዱ)
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS likes (
+            liker_id INTEGER,
+            liked_id INTEGER,
+            liked_at TEXT,
+            PRIMARY KEY (liker_id, liked_id)
+        )
+    ''')
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS matches (
+            user_one INTEGER,
+            user_two INTEGER,
+            matched_at TEXT,
+            PRIMARY KEY (user_one, user_two)
+        )
+    ''')
     conn.commit()
     conn.close()
 
@@ -181,15 +198,24 @@ def get_next_profile(viewer_id):
     cursor = conn.cursor()
 
     looking_for = viewer['looking_for']
+    viewer_gender = viewer['gender']
     query = "SELECT * FROM users WHERE user_id != ?"
     params = [viewer_id]
 
+    # ጾታን የማዛመድ ህግ (ወንድ ለሴት፣ ሴት ለወንድ፣ ወይም ሁለቱንም ለሚመርጡ)
     if looking_for not in ('ሁለቱንም', 'Both'):
         query += " AND (gender = ? OR gender = ?)"
         if looking_for in ('ወንድ', 'Male'):
             params.extend(['ወንድ', 'Male'])
         else:
             params.extend(['ሴት', 'Female'])
+            
+    # እኛንም የሚፈልግ መሆን አለበት (የጋራ መስፈርት)
+    query += " AND (looking_for = ? OR looking_for = ? OR looking_for = 'ሁለቱንም' OR looking_for = 'Both')"
+    if viewer_gender in ('ወንድ', 'Male'):
+        params.extend(['ወንድ', 'Male'])
+    else:
+        params.extend(['ሴት', 'Female'])
 
     query += """
         AND user_id NOT IN (
@@ -216,13 +242,42 @@ def mark_profile_seen(viewer_id, viewed_id):
     conn.commit()
     conn.close()
 
-# =========================================================
+# ላይክ እና ማች መመዝገቢያዎች
+def record_like(liker_id, liked_id):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute(
+        "INSERT OR IGNORE INTO likes (liker_id, liked_id, liked_at) VALUES (?, ?, ?)",
+        (liker_id, liked_id, datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
+    )
+    conn.commit()
+    
+    # የጋራ መፈላለግ (Match) መኖሩን ማረጋገጫ
+    cursor.execute("SELECT * FROM likes WHERE liker_id = ? AND liked_id = ?", (liked_id, liker_id))
+    match = cursor.fetchone()
+    
+    is_match = False
+    if match:
+        is_match = True
+        cursor.execute(
+            "INSERT OR IGNORE INTO matches (user_one, user_two, matched_at) VALUES (?, ?, ?)",
+            (min(liker_id, liked_id), max(liker_id, liked_id), datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
+        )
+        conn.commit()
+        
+    conn.close()
+    return is_match
+    # =========================================================
 # 5. ቦት ኮማንዶች (BOT COMMANDS)
 # =========================================================
 
 @bot.message_handler(commands=['start'])
 def start_cmd(message):
     user_id = message.from_user.id
+    
+    # ⚠️ ተጣብቀው እንዳይቀሩ የቆየውን State እናጸዳለን
+    if user_id in user_states:
+        user_states[user_id] = {}
 
     if is_registered(user_id):
         lang = get_user_language(user_id)
@@ -340,9 +395,11 @@ def browse_cmd(message):
         f"⭐️ {profile['zodiac']}"
     )
 
+    # 💚 Like እና ❌ Next ኢንላይን ቁልፎችን በትክክለኛው መጠን ይፈጥራል
     markup = types.InlineKeyboardMarkup()
-    next_label = "➡️ ቀጣይ" if lang == 'am' else "➡️ Next"
-    markup.add(types.InlineKeyboardButton(next_label, callback_data="browse_next"))
+    btn_like = types.InlineKeyboardButton("💚 Like", callback_data=f"like_{profile['user_id']}")
+    btn_next = types.InlineKeyboardButton("❌ Next", callback_data="browse_next")
+    markup.add(btn_like, btn_next)
 
     if profile['photo_id']:
         bot.send_photo(message.chat.id, profile['photo_id'], caption=caption, reply_markup=markup, parse_mode="Markdown")
@@ -448,6 +505,39 @@ def handle_callback_queries(call):
     bot.answer_callback_query(call.id)
     user_id = call.from_user.id
 
+    # 💚 Like ቁልፍ ሲጫን የሚሰራው
+    if call.data.startswith("like_"):
+        target_id = int(call.data.split("_")[1])
+        lang = get_user_language(user_id)
+        
+        try:
+            bot.delete_message(call.message.chat.id, call.message.message_id)
+        except Exception:
+            pass
+            
+        # ሬከርድ እናደርጋለን እንዲሁም ማች መፈጠሩን እንፈትሻለን
+        is_match = record_like(user_id, target_id)
+        
+        if is_match:
+            # የሁለቱንም የቻት ሁኔታ እንከፍታለን
+            user_states[user_id] = {'step': 'chatting', 'chat_with': target_id}
+            user_states[target_id] = {'step': 'chatting', 'chat_with': user_id}
+            
+            match_msg_viewer = "🎉 **እንኳን ደስ አሎት! Match ተፈጥሯል!** 🎉\n\nአሁን በቀጥታ መጻጻፍ ትችላላችሁ። መልእክትዎን እዚህ መጻፍ ይጀምሩ።\n\n⚠️ መጻጻፉን ለማቆም `/stop_chat` ይበሉ።"
+            match_msg_target = "🎉 **እንኳን ደስ አሎት! አዲስ Match አለዎት!** 🎉\n\nአሁን በቀጥታ መጻጻፍ ትችላላችሁ። መልእክትዎን እዚህ መጻፍ ይጀምሩ።\n\n⚠️ መጻጻፉን ለማቆም `/stop_chat` ይበLock።"
+            
+            bot.send_message(user_id, match_msg_viewer, parse_mode="Markdown")
+            try:
+                bot.send_message(target_id, match_msg_target, parse_mode="Markdown")
+            except Exception:
+                pass
+        else:
+            like_confirm = "💚 ወደዱት! እሱ/እሷም መልሰው Like ሲያደርጉዎት እናሳውቆታለን።" if lang == 'am' else "💚 Liked! We will notify you when they like you back."
+            bot.send_message(call.message.chat.id, like_confirm)
+            # ወደ ቀጣዩ ፕሮፋይል ይመራዋል
+            browse_cmd(call.message)
+        return
+
     # የአድሚን ክፍያ ማረጋገጫዎች
     if call.data.startswith("vipapprove_"):
         target_user_id = int(call.data.split("_", 1)[1])
@@ -492,6 +582,10 @@ def handle_callback_queries(call):
         return
 
     if call.data == "browse_next":
+        try:
+            bot.delete_message(call.message.chat.id, call.message.message_id)
+        except Exception:
+            pass
         browse_cmd(call.message)
         return
 
@@ -630,6 +724,33 @@ def handle_callback_queries(call):
 @bot.message_handler(content_types=['text', 'photo'])
 def registration_flow(message):
     user_id = message.from_user.id
+    
+    # 💬 እርስ በርስ መጻጻፊያ (Chat System)
+    if user_id in user_states and user_states[user_id].get('step') == 'chatting':
+        target_chat_id = user_states[user_id].get('chat_with')
+        
+        # ቻት ማቆሚያ ትእዛዝ
+        if message.text in ("/stop_chat", "/exit"):
+            user_states.pop(user_id, None)
+            user_states.pop(target_chat_id, None)
+            
+            bot.send_message(user_id, "📴 መጻጻፉ ተቋርጧል። ወደ ዋናው ማውጫ ለመመለስ /start ይበሉ።")
+            try:
+                bot.send_message(target_chat_id, "📴 ሌላኛው ወገን መጻጻፉን አቋርጧል። ወደ ዋናው ማውጫ ለመመለስ /start ይበሉ።")
+            except Exception:
+                pass
+            return
+            
+        # መልእክት ማስተላለፊያ
+        try:
+            if message.content_type == 'text':
+                bot.send_message(target_chat_id, f"💬 {message.text}")
+            elif message.content_type == 'photo':
+                bot.send_photo(target_chat_id, message.photo[-1].file_id, caption=message.caption or "")
+        except Exception:
+            bot.send_message(user_id, "⚠️ መልእክቱን ማድረስ አልተቻለም። ተጠቃሚው ቦቱን ዘግቶት ሊሆን ይችላል።")
+        return
+
     if user_id not in user_states:
         return
 
@@ -795,7 +916,7 @@ def registration_flow(message):
             bot.send_message(message.chat.id, congrats_text, parse_mode="Markdown")
         else:
             err_photo = "⚠️ እባክዎ መገለጫዎ ላይ የሚቀመጥ እውነተኛ **ፎቶ** ብቻ ይላኩ!" if lang == 'am' else "⚠️ Please send a real **photo** for your profile!"
-            bot.reply_to(message, err_photo, parse_mode="Markdown")
+            bot.reply_tobot.reply_to(message, err_photo, parse_mode="Markdown")
 
 @bot.message_handler(commands=['reset_db'])
 def reset_database(message):
@@ -808,6 +929,8 @@ def reset_database(message):
         cursor.execute("DROP TABLE IF EXISTS users")
         cursor.execute("DROP TABLE IF EXISTS daily_views")
         cursor.execute("DROP TABLE IF EXISTS seen_profiles")
+        cursor.execute("DROP TABLE IF EXISTS likes")
+        cursor.execute("DROP TABLE IF EXISTS matches")
         conn.commit()
         conn.close()
 
@@ -820,6 +943,21 @@ def reset_database(message):
 # ቦቱን የማስነሻ ዋና ክፍል
 if __name__ == '__main__':
     print("የኢትዮ ላቭ ቦት በተሳካ ሁኔታ ስራ ጀምሯል...")
+    
+    # 1. ዌብሁክን ያጸዳል
+    try:
+        bot.remove_webhook()
+        import time
+        time.sleep(2)
+    except Exception as e:
+        print(f"Error removing webhook: {e}")
+
+    # 2. የ Flask ሰርቨሩን በጀርባ ያስነሳል
     keep_alive()
-    bot.remove_webhook()
-    bot.infinity_polling(skip_pending=True)
+
+    # 3. ቦቱን በደህንነት ያስነሳል
+    try:
+        bot.infinity_polling(skip_pending=True, timeout=60, non_stop=True)
+    except Exception as e:
+        print(f"Polling error occurred: {e}")
+        
