@@ -463,4 +463,4 @@ def handle_callback_queries(call):
         else:
             prompt = f"⭐️ Zodiac: **{zodiac}** selected.\n\n📸 **Final step!** Please upload a nice **photo** for your profile:"
             
-        bot.send_message(call.message.chat.id, prompt, pars
+        bot.send_message(call.message.chat.id, prompt, pars)
