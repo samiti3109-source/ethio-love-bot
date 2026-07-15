@@ -473,4 +473,6 @@ def reset_database(message):
 if __name__ == '__main__':
     print("የኢትዮ ላቭ ቦት በተሳካ ሁኔታ ስራ ጀምሯል...")
     keep_alive()
-    bot.infinity_polling()
+    # የድሮ ግንኙነቶችን በሙሉ አጽድቶ በንጽህና እንዲነሳ ያደርጋል
+    bot.remove_webhook()
+    bot.infinity_polling(skip_pending=True)
