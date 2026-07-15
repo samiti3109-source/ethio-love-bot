@@ -278,4 +278,199 @@ def handle_callback_queries(call):
         cursor.execute('''
             INSERT INTO users (user_id, username, fullname, gender, age, city, religion, zodiac, is_vip, vip_expiry, registered_at)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
-        ''', (user_id, username, state['fullname'], state['gender'], state['age'], state['city'], state['religion'], state['zodiac'], free_vip_expiry, reg
+        ''', (user_id, username, state['fullname'], state['gender'], state['age'], state['city'], state['religion'], state['zodiac'], free_vip_expiry, reg_date))
+        
+        conn.commit()
+        conn.close()
+        
+        # ከጊዜያዊ ሜሞሪ ማጥፋት
+        user_states.pop(user_id, None)
+        
+        bot.delete_message(call.message.chat.id, call.message.message_id)
+        
+        congrats_text = (
+            "🎉 **እንኳን ደስ አለዎት! ምዝገባዎ በተሳካ ሁኔታ ተጠናቋል።**\n\n"
+            "🎁 ለተመዘገቡበት **የ 5 ቀን ነጻ ቪአይፒ (VIP)** ተሰጥቶዎታል። ሁሉንም ጥቅሞች ያለገደብ መጠቀም ይችላሉ!\n\n"
+            "🔍 የሌሎችን መገለጫ ለማሰስ ➔ /browse ን ይጠቀሙ\n"
+            "👤 የራስዎን መገለጫ ለማየት ➔ /profile ን ይጠቀሙ"
+        )
+        bot.send_message(call.message.chat.id, congrats_text, parse_mode="Markdown")
+
+# ==========================================
+# 7. የቴሌግራም ሜኑ ሌሎች ትዕዛዞች
+# ==========================================
+
+# 2️⃣ /browse ➔ ፕሮፋይሎችን ማሰስ
+@bot.message_handler(commands=['browse'])
+def view_profiles(message):
+    user_id = message.from_user.id
+    if not is_registered(user_id):
+        bot.reply_to(message, "❌ እባክዎ መጀመሪያ ለመመዝገብ /start ን ይጫኑ።")
+        return
+
+    can_view = increment_and_check_profile_view(user_id)
+    
+    if not can_view:
+        block_text = (
+            "🚫 **የዛሬው የ30 ፕሮፋይል እይታ ገደብዎ አልቋል!**\n\n"
+            "መገለጫዎችን ማሰስ ለመቀጠል በወር **199 ብር** ብቻ በመክፈል የቪአይፒ (VIP) አባል ይሁኑ!\n\n"
+            "👉 ለመክፈል /vip ን ይጫኑ።"
+        )
+        bot.send_message(message.chat.id, block_text, parse_mode="Markdown")
+        return
+    
+    profile_sample = (
+        "🔍 **የአባላት መገለጫዎች (Browse)** 🔍\n\n"
+        "👤 **ስም፦** አስቴር\n"
+        "🚺 **ጾታ፦** ሴት\n"
+        "🔞 **እድሜ፦** 24\n"
+        "⛪️ **ሃይማኖት፦** ኦርቶዶክስ\n"
+        "♍️ **የኮከብ ምልክት፦** ቪርጎ\n"
+        "📍 **ከተማ፦** አዲስ አበባ\n\n"
+        "⏭ ሌላ ፕሮፋይል ለማየት መልሰው /browse ን ይጫኑ።"
+    )
+    bot.send_message(message.chat.id, profile_sample, parse_mode="Markdown")
+
+# 3️⃣ /likes ➔ እኔን ላይክ ያደረጉኝ
+@bot.message_handler(commands=['likes'])
+def show_likes(message):
+    if not is_registered(message.from_user.id):
+        bot.reply_to(message, "❌ እባክዎ መጀመሪያ ለመመዝገብ /start ን ይጫኑ።")
+        return
+    likes_text = (
+        "❤️ **እርስዎን ላይክ ያደረጉ ሰዎች** ❤️\n\n"
+        "እስካሁን ምንም አዲስ ላይክ የሎትም።"
+    )
+    bot.send_message(message.chat.id, likes_text, parse_mode="Markdown")
+
+# 4️⃣ /matches ➔ ማች የሆኑ ፕሮፋይሎች
+@bot.message_handler(commands=['matches'])
+def show_matches(message):
+    if not is_registered(message.from_user.id):
+        bot.reply_to(message, "❌ እባክዎ መጀመሪያ ለመመዝገብ /start ን ይጫኑ።")
+        return
+    matches_text = (
+        "🎉 **የእርስዎ ምርጫዎች (My Matches)** 🎉\n\n"
+        "እስካሁን አዲስ ተዛማጅ (Match) የለም።"
+    )
+    bot.send_message(message.chat.id, matches_text, parse_mode="Markdown")
+
+# 5️⃣ /profile ➔ የእኔ ፕሮፋይል (የተመዘገቡትን መረጃዎች ጨምሮ ያሳያል)
+@bot.message_handler(commands=['profile'])
+def my_profile(message):
+    user_id = message.from_user.id
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT * FROM users WHERE user_id = ?", (user_id,))
+    user = cursor.fetchone()
+    
+    if not user:
+        bot.reply_to(message, "❌ እባክዎ መጀመሪያ ለመመዝገብ /start ን ይጫኑ።")
+        conn.close()
+        return
+        
+    is_vip = user['is_vip']
+    vip_expiry = user['vip_expiry']
+    fullname = user['fullname']
+    username = f"@{user['username']}" if user['username'] else "የለውም"
+    
+    vip_status = "❌ ቪአይፒ አይደሉም (ነጻ እቅድ)"
+    if is_vip == 1 and vip_expiry:
+        try:
+            expiry_date = datetime.strptime(vip_expiry, '%Y-%m-%d %H:%M:%S')
+            if datetime.now() < expiry_date:
+                vip_status = f"✅ ቪአይፒ አባል (የሚያበቃበት ቀን: {expiry_date.strftime('%Y-%m-%d')})"
+        except ValueError:
+            pass
+            
+    profile_text = (
+        "👤 **የእርስዎ መገለጫ (My Profile)** 👤\n\n"
+        f"🏷 **ሙሉ ስም፦** {fullname}\n"
+        f"🚻 **ጾታ፦** {user['gender']}\n"
+        f"🔞 **እድሜ፦** {user['age']}\n"
+        f"📍 **ከተማ፦** {user['city']}\n"
+        f"⛪️ **ሃይማኖት፦** {user['religion']}\n"
+        f"⭐️ **ኮከብ፦** {user['zodiac']}\n"
+        f"🆔 **ቴሌግራም ID፦** `{user_id}`\n"
+        f"🌐 **ዩዘርኔም፦** {username}\n"
+        f"⭐️ **የአባልነት ሁኔታ፦** {vip_status}\n\n"
+        "⚙️ መረጃዎን ለማስተካከል /edit ን ይጠቀሙ።"
+    )
+    bot.send_message(message.chat.id, profile_text, parse_mode="Markdown")
+    conn.close()
+
+# 6️⃣ /edit ➔ ፕሮፋይል ማሻሻል
+@bot.message_handler(commands=['edit'])
+def edit_profile(message):
+    if not is_registered(message.from_user.id):
+        bot.reply_to(message, "❌ እባክዎ መጀመሪያ ለመመዝገብ /start ን ይጫኑ።")
+        return
+    edit_text = (
+        "⚙️ **መገለጫዎን ማስተካከያ** ⚙️\n\n"
+        "መረጃዎትን እንደ አዲስ ለማስገባት ከፈለጉ አድሚኑን ያነጋግሩ ወይም በቅርቡ የሚለቀቀውን ማሻሻያ ይጠብቁ!"
+    )
+    bot.send_message(message.chat.id, edit_text, parse_mode="Markdown")
+
+# 7️⃣ /vip ➔ ቪአይፒ መሆን
+@bot.message_handler(commands=['vip', 'buycoins', 'buy_vip'])
+def show_payment_options(message):
+    price_text = (
+        "👑 **የVIP አባልነት ፓኬጆች እና የክፍያ አማራጮች** 👑\n\n"
+        "የኛ የቪአይፒ አባል በመሆን በቀን ያለገደብ የብዙ ሺህ ሰዎችን ፕሮፋይል መመልከት እና መልዕክት መለዋወጥ ይችላሉ!\n\n"
+        "💵 **የVIP ጥቅሎች፦**\n"
+        "1️⃣ **የ 1 ወር አባልነት** ➔ **199 ብር**\n"
+        "2️⃣ **የ 3 ወር አባልነት** ➔ **499 ብር**\n"
+        "3️⃣ **የ 6 ወር አባልነት** ➔ **999 ብር**\n"
+        "4️⃣ **የ 1 ዓመት አባልነት** ➔ **1799 ብር**\n\n"
+        "👇 ለመክፈል ከታች ከቀረቡት አማራጮች አንዱን ይምረጡ፦"
+    )
+    markup = types.InlineKeyboardMarkup(row_width=1)
+    
+    btn_1m = types.InlineKeyboardButton("የ 1 ወር (199 ብር) መክፈያ", url="https://dashboard.chapa.co")
+    btn_3m = types.InlineKeyboardButton("የ 3 ወር (499 ብር) መክፈያ", url="https://dashboard.chapa.co")
+    btn_6m = types.InlineKeyboardButton("የ 6 ወር (999 ብር) መክፈያ", url="https://dashboard.chapa.co")
+    btn_1y = types.InlineKeyboardButton("የ 1 ዓመት (1799 ብር) መክፈያ", url="https://dashboard.chapa.co")
+    
+    markup.add(btn_1m, btn_3m, btn_6m, btn_1y)
+    bot.send_message(message.chat.id, price_text, parse_mode="Markdown", reply_markup=markup)
+
+# 8️⃣ /help ➔ እርዳታ
+@bot.message_handler(commands=['help'])
+def help_info(message):
+    help_text = (
+        "ℹ️ **የእርዳታ እና መረጃ ማዕከል** ℹ️\n\n"
+        "📌 **የዋና ዋና አዝራሮች መመሪያ፦**\n"
+        "• /start ➔ ቦቱን ለመጀመር እና ለመመዝገብ\n"
+        "• /browse ➔ የሰዎችን መገለጫ ለማየት\n"
+        "• /profile ➔ የእርስዎን ሙሉ መረጃ ለማረጋገጥ\n"
+        "• /vip ➔ ቪአይፒ ለመሆን"
+    )
+    bot.send_message(message.chat.id, help_text, parse_mode="Markdown")
+
+# 🔄 9️⃣ /reset_db ➔ ዳታቤዙን ለአድሚን ብቻ (1883279841) ማጽጃ ኮድ
+@bot.message_handler(commands=['reset_db'])
+def reset_database(message):
+    user_id = message.from_user.id
+    
+    if user_id != ADMIN_ID:
+        return
+        
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("DROP TABLE IF EXISTS users")
+        cursor.execute("DROP TABLE IF EXISTS daily_views")
+        conn.commit()
+        conn.close()
+        
+        init_db()
+        bot.reply_to(message, "🔄 ሄሎ ሳሚ! ዳታቤዙ (Database) በስኬት ተጠርጎ አዲስ ሰንጠረዦች ተፈጥረዋል!")
+    except Exception as e:
+        conn.close()
+        bot.reply_to(message, f"❌ ስህተት አጋጥሟል: {str(e)}")
+
+# 6. ቦቱን የማስነሻ ዋና ክፍል
+if __name__ == '__main__':
+    print("የኢትዮ ላቭ ቦት በተሳካ ሁኔታ ስራ ጀምሯል...")
+    keep_alive()
+    bot.infinity_polling()
